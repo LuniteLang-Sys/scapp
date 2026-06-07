@@ -1,0 +1,21 @@
+{
+    "default_server_config": {
+        "m.homeserver": {
+            "base_url": "http://192.168.1.2:6167",
+            "server_name": "192.168.1.2"
+        }
+    },
+    "disable_custom_urls": false,
+    "disable_guests": true,
+    "disable_login_language_selector": false,
+    "disable_3pid_login": true,
+    "force_verification": false,
+    "brand": "Matrix LAN",
+    "default_theme": "dark",
+    "room_directory": {
+        "servers": []
+    },
+    "setting_defaults": {
+        "breadcrumbs": true
+    }
+}

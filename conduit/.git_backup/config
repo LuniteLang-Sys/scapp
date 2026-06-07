@@ -1,0 +1,14 @@
+[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = false
+	logallrefupdates = true
+	symlinks = false
+	ignorecase = true
+[remote "origin"]
+	url = https://gitlab.com/famedly/conduit.git
+	fetch = +refs/heads/next:refs/remotes/origin/next
+[branch "next"]
+	remote = origin
+	merge = refs/heads/next
+	vscode-merge-base = origin/next

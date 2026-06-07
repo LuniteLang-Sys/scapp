@@ -1,0 +1,16 @@
+# Rust build artifacts
+conduit/target/
+**/target/
+
+# OS/System files
+Thumbs.db
+.DS_Store
+
+# IDEs and editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
