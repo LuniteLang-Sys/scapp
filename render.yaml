@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: scapp-conduit-tor
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /_healthz
+    # Uncomment the following block if you upgrade to a paid Render plan
+    # and want to persist your Tor keys and Conduit database.
+    # disk:
+    #   name: data
+    #   mountPath: /data
+    #   sizeGB: 1

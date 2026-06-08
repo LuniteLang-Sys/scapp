@@ -1,0 +1,4 @@
+User debian-tor
+DataDirectory __DATA_DIR__/tor
+HiddenServiceDir __DATA_DIR__/tor/hidden_service/
+HiddenServicePort 80 127.0.0.1:__PORT__
