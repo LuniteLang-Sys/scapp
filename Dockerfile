@@ -9,10 +9,11 @@ RUN apt-get update && \
     curl \
     ca-certificates \
     jq \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and install pre-built Conduit (x86_64 linux)
-RUN curl -L -o /usr/local/bin/conduit https://gitlab.com/famedly/conduit/-/releases/v0.11.0-alpha/downloads/x86_64-unknown-linux-musl \
+RUN curl -L -o /usr/local/bin/conduit "https://gitlab.com/api/v4/projects/famedly%2Fconduit/jobs/artifacts/next/raw/x86_64-unknown-linux-musl?job=artifacts" \
     && chmod +x /usr/local/bin/conduit
 
 # Setup Element Web
