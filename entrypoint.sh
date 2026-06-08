@@ -1,39 +1,32 @@
 #!/bin/bash
 set -e
 
-# Default port to 10000 if not set by Render
 PORT="${PORT:-10000}"
 
-# Substitute PORT in nginx.conf and torrc
 sed -i "s/__PORT__/$PORT/g" /etc/nginx/nginx.conf
 sed -i "s/__PORT__/$PORT/g" /etc/tor/torrc
 
-# Render might provide a persistent disk at /data.
-# If /data does not exist or we are not using a disk, we fallback to /var/lib.
 DATA_DIR="/data"
 if [ ! -d "/data" ]; then
     echo "/data directory not found, using ephemeral storage /var/lib"
     DATA_DIR="/var/lib"
 fi
 
-# Substitute DATA_DIR in torrc
 sed -i "s|__DATA_DIR__|$DATA_DIR|g" /etc/tor/torrc
 
-# Setup Tor Hidden Service directory
 TOR_DIR="$DATA_DIR/tor/hidden_service"
 mkdir -p "$TOR_DIR"
 chown -R debian-tor:debian-tor "$DATA_DIR/tor"
 chmod 700 "$TOR_DIR"
 
-# Setup Conduit Database directory
 CONDUIT_DB="$DATA_DIR/conduit"
 mkdir -p "$CONDUIT_DB"
 
-# Generate Tor Hidden Service if it doesn't exist yet by starting tor temporarily
 echo "Starting tor to generate hidden service keys..."
-tor -f /etc/tor/torrc --RunAsDaemon 1
+# Run tor in the background natively, not daemonized by itself
+su -s /bin/bash -c "exec tor -f /etc/tor/torrc" debian-tor &
+TOR_PID=$!
 
-# Wait for hostname to be generated
 for i in {1..15}; do
     if [ -f "$TOR_DIR/hostname" ]; then
         break
@@ -48,7 +41,6 @@ fi
 
 ONION_ADDRESS=$(cat "$TOR_DIR/hostname")
 
-# Sinh mã đăng ký ngẫu nhiên nếu chưa có
 if [ ! -f "$DATA_DIR/conduit_token" ]; then
     cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1 > "$DATA_DIR/conduit_token"
 fi
@@ -56,18 +48,19 @@ REG_TOKEN=$(cat "$DATA_DIR/conduit_token")
 
 echo "========================================================="
 echo "Tor Hidden Service Address: $ONION_ADDRESS"
-echo "Registration Token (GIỮ BÍ MẬT): $REG_TOKEN"
+echo "Registration Token (KEEP SECRET): $REG_TOKEN"
 echo "========================================================="
 
-# Stop the temporary tor instance
-pkill tor || true
+# Stop the temporary tor instance by directly killing the bash exec pid
+kill $TOR_PID || true
 sleep 1
+# Extra cleanup just in case
+pkill -9 tor || true
+killall -9 tor || true
 
-# Update Element config.json dynamically
 echo "Configuring Element web interface..."
 CONFIG_PATH="/var/www/element/config.json"
 if [ -f "$CONFIG_PATH" ]; then
-    # Xoá toàn bộ link rò rỉ ra ngoài clearnet
     jq --arg onion "$ONION_ADDRESS" '
       .default_server_config."m.homeserver".base_url = "http://\($onion)" | 
       .default_server_config."m.homeserver".server_name = $onion |
@@ -86,19 +79,26 @@ if [ -f "$CONFIG_PATH" ]; then
     mv /tmp/config.json "$CONFIG_PATH"
 fi
 
-# Configure Conduit
-export CONDUIT_SERVER_NAME="$ONION_ADDRESS"
-export CONDUIT_DATABASE_PATH="$CONDUIT_DB"
-export CONDUIT_DATABASE_BACKEND="sqlite"
-export CONDUIT_PORT=6167
-export CONDUIT_ADDRESS="127.0.0.1"
-export CONDUIT_ALLOW_REGISTRATION="false"
-export CONDUIT_ALLOW_FEDERATION="false"
-export CONDUIT_REGISTRATION_TOKEN="$REG_TOKEN"
+echo "Configuring Conduit..."
+mkdir -p /etc/matrix-conduit
+cat <<EOF > /etc/matrix-conduit/conduit.toml
+[global]
+server_name = "${ONION_ADDRESS}"
+database_path = "${CONDUIT_DB}"
+database_backend = "sqlite"
+port = 6167
+address = "127.0.0.1"
+allow_registration = false
+allow_federation = false
+registration_token = "${REG_TOKEN}"
+max_request_size = 20_000_000
+trusted_servers = ["matrix.org"]
+EOF
 
-# Chuyển quyền thư mục DB cho www-data để chạy dưới quyền tối thiểu
+chown -R www-data:www-data /etc/matrix-conduit
+export CONDUIT_CONFIG="/etc/matrix-conduit/conduit.toml"
+
 chown -R www-data:www-data "$CONDUIT_DB"
 
-# Start supervisord to launch everything
-echo "Starting Nginx, Tor, and Conduit..."
+echo "Starting Nginx, Tor, and Conduit via supervisord..."
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
