@@ -25,9 +25,10 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY torrc /etc/tor/torrc
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Copy entrypoint script
+# Copy entrypoint and start scripts
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY start-conduit.sh /start-conduit.sh
+RUN chmod +x /entrypoint.sh /start-conduit.sh
 
 # Default environment variables
 ENV PORT=10000
