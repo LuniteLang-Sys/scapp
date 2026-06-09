@@ -9,7 +9,7 @@ if [ -n "$RENDER_EXTERNAL_HOSTNAME" ]; then
   sed -i "s|https://matrix.example.com|https://$RENDER_EXTERNAL_HOSTNAME|g" /var/www/element/config.json
   sed -i "s|matrix.example.com|$RENDER_EXTERNAL_HOSTNAME|g" /var/www/element/config.json
 
-  # Dynamically generate .well-known discovery files (Removed Identity Server for Privacy)
+  # Dynamically generate .well-known discovery files
   mkdir -p /var/www/element/.well-known/matrix
   echo "{\"m.homeserver\": {\"base_url\": \"https://$RENDER_EXTERNAL_HOSTNAME\"}}" > /var/www/element/.well-known/matrix/client
   echo "{\"m.server\": \"$RENDER_EXTERNAL_HOSTNAME:443\"}" > /var/www/element/.well-known/matrix/server
@@ -24,33 +24,46 @@ mkdir -p /var/lib/matrix-conduit/
 export CONDUIT_ADDRESS="127.0.0.1"
 export CONDUIT_PORT=6167
 export CONDUIT_DATABASE_PATH="/var/lib/matrix-conduit/"
+export CONDUIT_DATABASE_BACKEND="sqlite"
+export CONDUIT_MAX_REQUEST_SIZE="20000000"
+export CONDUIT_ALLOW_FEDERATION="false"
 
 # ---------------------------------------------------------
-# ULTRA SECRET ADMIN MASTER KEY GENERATION
+# ADMIN MASTER KEY GENERATION
+# Use /dev/urandom with tr + head -c (busybox compatible)
 # ---------------------------------------------------------
 if [ ! -f /var/lib/matrix-conduit/master_token.txt ]; then
-  # Generate a 32-character random alphanumeric string
-  cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1 > /var/lib/matrix-conduit/master_token.txt
+  # Generate a 32-character random alphanumeric string (busybox compatible)
+  tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32 > /var/lib/matrix-conduit/master_token.txt
 fi
 
 MASTER_TOKEN=$(cat /var/lib/matrix-conduit/master_token.txt)
 
 echo "================================================================="
-echo "🚨 BÍ MẬT QUỐC GIA - ADMIN MASTER KEY CỦA BẠN 🚨"
-echo "Chỉ có người ấn nút Deploy trên Render mới được thấy dòng này!"
+echo "ADMIN MASTER KEY (Registration Token)"
 echo "Master Key: $MASTER_TOKEN"
-echo "Hãy dùng Key này dán vào ô 'Registration Token' khi đăng ký."
-echo "Tài khoản đầu tiên đăng ký thành công sẽ trở thành ADMIN."
+echo "Use this token in the 'Registration Token' field when signing up."
 echo "================================================================="
 
+# Allow registration with token (users must provide the token to register)
+export CONDUIT_ALLOW_REGISTRATION="true"
 export CONDUIT_REGISTRATION_TOKEN="$MASTER_TOKEN"
-export CONDUIT_ALLOW_REGISTRATION="false" 
-export CONDUIT_ALLOW_FEDERATION="false"
 
 echo "Starting Conduit Server..."
-# Run conduit in background
+# Run conduit in background, redirect stderr to stdout for logging
 /usr/local/bin/conduit &
+CONDUIT_PID=$!
 
+# Wait a moment for conduit to start
+sleep 2
+
+# Check if conduit is still running
+if ! kill -0 $CONDUIT_PID 2>/dev/null; then
+  echo "ERROR: Conduit failed to start! Check logs above."
+  exit 1
+fi
+
+echo "Conduit is running (PID: $CONDUIT_PID)"
 echo "Starting Nginx Proxy & Web Client..."
 # Run Nginx in foreground
 nginx -g "daemon off;"
