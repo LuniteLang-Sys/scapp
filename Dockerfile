@@ -1,19 +1,17 @@
-# Stage 1: Get Conduit binary from official image
-FROM docker.io/matrixconduit/matrix-conduit:latest AS conduit-builder
+# Use the official Conduit image as base (it's Alpine-based)
+# and add nginx + supervisor on top of it
+FROM docker.io/matrixconduit/matrix-conduit:latest
 
-# Stage 2: Final Image with Nginx + Conduit + Element
-FROM docker.io/nginx:alpine
+USER root
 
-# Install dependencies
-RUN apk add --no-cache supervisor sed
+# Install nginx and supervisor (conduit image is Alpine-based)
+RUN apk add --no-cache nginx supervisor sed
 
-# Copy Conduit binary from official image
-# Binary is at /srv/conduit/conduit per official Dockerfile
-COPY --from=conduit-builder /srv/conduit/conduit /usr/local/bin/conduit
-RUN chmod +x /usr/local/bin/conduit
+# Create nginx directories
+RUN mkdir -p /run/nginx /var/log/nginx /var/lib/nginx/tmp
 
 # Remove default nginx config
-RUN rm /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/http.d/default.conf /etc/nginx/conf.d/default.conf
 
 # Copy our custom nginx config
 COPY nginx.conf /etc/nginx/nginx.conf
@@ -31,5 +29,6 @@ RUN chmod +x /start.sh
 # Expose the port Nginx is listening on
 EXPOSE 10000
 
-# Start everything
+# Override conduit's default entrypoint
+ENTRYPOINT []
 CMD ["/start.sh"]

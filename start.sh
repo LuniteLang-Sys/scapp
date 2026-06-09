@@ -48,8 +48,23 @@ export CONDUIT_ALLOW_REGISTRATION="false"
 export CONDUIT_ALLOW_FEDERATION="false"
 
 echo "Starting Conduit Server..."
+# Try known binary locations (conduit official image uses /srv/conduit/conduit)
+CONDUIT_BIN=""
+for p in /srv/conduit/conduit /usr/local/bin/conduit /conduit; do
+  if [ -x "$p" ]; then
+    CONDUIT_BIN="$p"
+    break
+  fi
+done
+
+if [ -z "$CONDUIT_BIN" ]; then
+  echo "ERROR: conduit binary not found!"
+  exit 1
+fi
+
+echo "Found conduit at: $CONDUIT_BIN"
 # Run conduit in background
-/usr/local/bin/conduit &
+"$CONDUIT_BIN" &
 
 echo "Starting Nginx Proxy & Web Client..."
 # Run Nginx in foreground
