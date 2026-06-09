@@ -1,18 +1,4 @@
 services:
-<<<<<<< Updated upstream
-  - type: web
-    name: scapp-conduit-tor
-    env: docker
-    dockerfilePath: ./Dockerfile
-    plan: free
-    healthCheckPath: /_healthz
-    # Uncomment the following block if you upgrade to a paid Render plan
-    # and want to persist your Tor keys and Conduit database.
-    # disk:
-    #   name: data
-    #   mountPath: /data
-    #   sizeGB: 1
-=======
   # ---------------------------------------------------------
   # UNIFIED APP: Conduit (Matrix) + Element (Web Client)
   # ---------------------------------------------------------
@@ -36,4 +22,3 @@ services:
       # Tell Conduit to use RocksDB instead of SQLite for better performance
       - key: CONDUIT_DATABASE_BACKEND
         value: "rocksdb"
->>>>>>> Stashed changes
