@@ -1,17 +1,39 @@
-# Use the official Conduit image as base (it's Alpine-based)
-# and add nginx + supervisor on top of it
-FROM docker.io/matrixconduit/matrix-conduit:latest
+# ============================================================
+# Stage 1: Build Conduit from source
+# Uses Rust + musl for a fully static binary compatible with
+# any Alpine/Linux base (no glibc dependency)
+# ============================================================
+FROM docker.io/rust:alpine AS builder
 
-USER root
+RUN apk add --no-cache musl-dev git pkgconfig openssl-dev openssl-libs-static
 
-# Install nginx and supervisor (conduit image is Alpine-based)
-RUN apk add --no-cache nginx supervisor sed
+# Clone specific stable release
+RUN git clone --depth 1 --branch v0.10.12 \
+    https://gitlab.com/famedly/conduit.git /build
 
-# Create nginx directories
-RUN mkdir -p /run/nginx /var/log/nginx /var/lib/nginx/tmp
+WORKDIR /build
+
+# Build with sqlite backend (lighter, no rocksdb compile dependency)
+# CARGO_NET_GIT_FETCH_WITH_CLI=true helps in CI environments
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+RUN cargo build --release --locked \
+    --no-default-features \
+    --features="conduit_bin,backend_sqlite"
+
+# ============================================================
+# Stage 2: Final Image — nginx:alpine + Conduit binary
+# ============================================================
+FROM docker.io/nginx:alpine
+
+# Install runtime dependencies
+RUN apk add --no-cache supervisor sed ca-certificates
+
+# Copy the compiled Conduit binary from builder
+COPY --from=builder /build/target/release/conduit /usr/local/bin/conduit
+RUN chmod +x /usr/local/bin/conduit
 
 # Remove default nginx config
-RUN rm -f /etc/nginx/http.d/default.conf /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/conf.d/default.conf
 
 # Copy our custom nginx config
 COPY nginx.conf /etc/nginx/nginx.conf
@@ -29,6 +51,4 @@ RUN chmod +x /start.sh
 # Expose the port Nginx is listening on
 EXPOSE 10000
 
-# Override conduit's default entrypoint
-ENTRYPOINT []
 CMD ["/start.sh"]
