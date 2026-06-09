@@ -13,12 +13,12 @@ RUN git clone --depth 1 --branch v0.10.12 \
 
 WORKDIR /build
 
-# Build with sqlite backend (lighter, no rocksdb compile dependency)
-# CARGO_NET_GIT_FETCH_WITH_CLI=true helps in CI environments
+# Build with sqlite backend
+# backend_sqlite = ["sqlite"], sqlite = ["parking_lot", "rusqlite", "tokio/signal"]
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-RUN cargo build --release --locked \
+RUN cargo build --release \
     --no-default-features \
-    --features="conduit_bin,backend_sqlite"
+    --features="conduit_bin,backend_sqlite,sqlite"
 
 # ============================================================
 # Stage 2: Final Image — nginx:alpine + Conduit binary
