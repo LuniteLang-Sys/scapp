@@ -1,4 +1,5 @@
 services:
+<<<<<<< Updated upstream
   - type: web
     name: scapp-conduit-tor
     env: docker
@@ -11,3 +12,28 @@ services:
     #   name: data
     #   mountPath: /data
     #   sizeGB: 1
+=======
+  # ---------------------------------------------------------
+  # UNIFIED APP: Conduit (Matrix) + Element (Web Client)
+  # ---------------------------------------------------------
+  - type: web
+    name: matrix-chat-app
+    env: docker
+    
+    # ⚠️ WARNING: Free Tier does not support 'disk'. 
+    # If you are on the Free Tier, your database will be wiped on restart!
+    # If you upgrade to Starter ($7/mo), uncomment the 'disk' section below:
+    # disk:
+    #   name: conduit-db
+    #   mountPath: /var/lib/matrix-conduit/
+    #   sizeGB: 1
+    
+    envVars:
+      # Render expects the web server to listen on PORT 10000 by default
+      - key: PORT
+        value: "10000"
+      
+      # Tell Conduit to use RocksDB instead of SQLite for better performance
+      - key: CONDUIT_DATABASE_BACKEND
+        value: "rocksdb"
+>>>>>>> Stashed changes
