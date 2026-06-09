@@ -1,15 +1,14 @@
-# Stage 1: Extract Conduit Binary
-FROM docker.io/matrixconduit/matrix-conduit:latest AS conduit-builder
-
-# Stage 2: Final Image with Nginx + Conduit + Element
+# Single stage: nginx:alpine as base, download conduit binary from GitHub releases
 FROM docker.io/nginx:alpine
 
-# Copy Conduit binary from the builder stage
-# In newer versions, binary is at /usr/local/bin/conduit inside the image
-COPY --from=conduit-builder /usr/local/bin/conduit /usr/local/bin/conduit
+# Install dependencies: curl (to download conduit), ca-certificates, and supervisor
+RUN apk add --no-cache curl ca-certificates supervisor sed
 
-# Install dependencies if needed (nginx:alpine has basic tools)
-RUN apk add --no-cache curl sed
+# Download the conduit binary directly from GitHub releases (pre-compiled for musl/alpine)
+RUN curl -fSL \
+    "https://gitlab.com/famedly/conduit/-/releases/permalink/latest/downloads/conduit-x86_64-unknown-linux-musl" \
+    -o /usr/local/bin/conduit && \
+    chmod +x /usr/local/bin/conduit
 
 # Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf
@@ -21,8 +20,10 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY element /var/www/element
 
 # Set proper permissions
-RUN chown -R nginx:nginx /var/www/element && \
-    chmod +x /usr/local/bin/conduit
+RUN chown -R nginx:nginx /var/www/element
+
+# Copy supervisord config
+COPY supervisord.conf /etc/supervisord.conf
 
 # Copy startup script
 COPY start.sh /start.sh
