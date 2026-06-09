@@ -1,14 +1,12 @@
 # Stage 1: Extract Conduit Binary
 FROM docker.io/matrixconduit/matrix-conduit:latest AS conduit-builder
-# The official conduit image has the binary at /conduit or /usr/local/bin/conduit depending on version.
-# Usually it's at /
 
 # Stage 2: Final Image with Nginx + Conduit + Element
 FROM docker.io/nginx:alpine
 
-# Copy Conduit binary
-# The latest conduit image uses /conduit as the binary path
-COPY --from=conduit-builder /conduit /usr/local/bin/conduit
+# Copy Conduit binary from the builder stage
+# In newer versions, binary is at /usr/local/bin/conduit inside the image
+COPY --from=conduit-builder /usr/local/bin/conduit /usr/local/bin/conduit
 
 # Install dependencies if needed (nginx:alpine has basic tools)
 RUN apk add --no-cache curl sed
