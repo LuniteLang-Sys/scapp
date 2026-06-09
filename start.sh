@@ -20,14 +20,6 @@ fi
 # Ensure database directory exists
 mkdir -p /var/lib/matrix-conduit/
 
-# Configure Conduit to listen only on localhost for security
-export CONDUIT_ADDRESS="127.0.0.1"
-export CONDUIT_PORT=6167
-export CONDUIT_DATABASE_PATH="/var/lib/matrix-conduit/"
-export CONDUIT_DATABASE_BACKEND="sqlite"
-export CONDUIT_MAX_REQUEST_SIZE="20000000"
-export CONDUIT_ALLOW_FEDERATION="false"
-
 # ---------------------------------------------------------
 # ADMIN MASTER KEY GENERATION
 # Use /dev/urandom with tr + head -c (busybox compatible)
@@ -45,11 +37,26 @@ echo "Master Key: $MASTER_TOKEN"
 echo "Use this token in the 'Registration Token' field when signing up."
 echo "================================================================="
 
-# Allow registration with token (users must provide the token to register)
-export CONDUIT_ALLOW_REGISTRATION="true"
-export CONDUIT_REGISTRATION_TOKEN="$MASTER_TOKEN"
-
 echo "Starting Conduit Server..."
+
+# Create conduit config file (required by v0.10.12+)
+mkdir -p /etc/conduit
+cat > /etc/conduit/conduit.toml << EOF
+[global]
+server_name = "${CONDUIT_SERVER_NAME}"
+database_path = "/var/lib/matrix-conduit/"
+database_backend = "sqlite"
+port = 6167
+address = "127.0.0.1"
+allow_registration = true
+registration_token = "${MASTER_TOKEN}"
+allow_federation = false
+max_request_size = 20000000
+trusted_servers = ["matrix.org"]
+EOF
+
+export CONDUIT_CONFIG="/etc/conduit/conduit.toml"
+
 # Run conduit in background, redirect stderr to stdout for logging
 /usr/local/bin/conduit &
 CONDUIT_PID=$!
