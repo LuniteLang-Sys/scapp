@@ -30,8 +30,8 @@ chmod 700 "$TOR_HS_DIR"
 
 # Start Tor in background to generate hostname
 echo "Starting Tor to generate .onion address..."
-# Start tor and wait for it to initialize
-tor -f /etc/tor/torrc --RunAsDaemon 1
+# Start tor as debian-tor user to satisfy security checks
+su -s /bin/sh debian-tor -c "tor -f /etc/tor/torrc --RunAsDaemon 1"
 
 echo "Waiting for Tor to generate hidden service keys..."
 # We wait for the hostname file to appear
