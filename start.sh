@@ -12,37 +12,48 @@ mkdir -p "$DATA_DIR"
 echo "Configuring Tor..."
 TOR_DATA_DIR="$DATA_DIR/tor"
 TOR_HS_DIR="$TOR_DATA_DIR/hidden_service"
-mkdir -p "$TOR_HS_DIR"
-chown -R debian-tor:debian-tor "$TOR_DATA_DIR"
-chmod 700 "$TOR_HS_DIR"
 
-# Patch torrc placeholders
-sed -i "s|__DATA_DIR__|$DATA_DIR|g" /etc/tor/torrc
-sed -i "s|__PORT__|$PORT/g" /etc/tor/torrc 2>/dev/null || true
-# Simplified torrc if placeholders are missing
-if ! grep -q "HiddenServiceDir" /etc/tor/torrc; then
-  cat > /etc/tor/torrc << EOF
+# Clear old config to avoid conflicts
+rm -f /etc/tor/torrc
+
+# Create fresh torrc
+cat > /etc/tor/torrc << EOF
 DataDirectory $TOR_DATA_DIR
 HiddenServiceDir $TOR_HS_DIR
 HiddenServicePort 80 127.0.0.1:$PORT
+Log notice stdout
 EOF
-fi
+
+# Ensure directories exist and have correct permissions
+mkdir -p "$TOR_HS_DIR"
+# On Debian, Tor runs as debian-tor. We must ensure it can write to the data dir.
+chown -R debian-tor:debian-tor "$TOR_DATA_DIR"
+chmod 700 "$TOR_HS_DIR"
 
 # Start Tor in background to generate hostname
 echo "Starting Tor to generate .onion address..."
-tor -f /etc/tor/torrc --RunAsDaemon 1
+# We run it in background and redirect output to a temp file for debugging
+tor -f /etc/tor/torrc --RunAsDaemon 1 > /tmp/tor.log 2>&1
 
 echo "Waiting for Tor to generate hidden service keys..."
-for i in {1..60}; do
+for i in {1..45}; do
     if [ -f "$TOR_HS_DIR/hostname" ]; then
         FINAL_DOMAIN=$(cat "$TOR_HS_DIR/hostname")
         break
+    fi
+    # If Tor process died, show logs
+    if ! pgrep tor > /dev/null; then
+        echo "ERROR: Tor process died unexpectedly!"
+        cat /tmp/tor.log
+        exit 1
     fi
     sleep 2
 done
 
 if [ -z "$FINAL_DOMAIN" ]; then
     echo "ERROR: Tor failed to generate a hostname in time."
+    echo "Last Tor logs:"
+    cat /tmp/tor.log
     exit 1
 fi
 
