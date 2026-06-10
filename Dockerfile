@@ -36,12 +36,16 @@ RUN LIBCLANG_PATH=$(dirname $(find /usr/lib/llvm-* -name 'libclang.so*' -print -
         --features="conduit_bin,backend_rocksdb"
 
 # ============================================================
-# Stage 2: Final Image — nginx:alpine + Conduit binary
+# Stage 2: Final Image — nginx:bookworm-slim + Conduit binary
+# NOTE: Must use Debian here too — binary is compiled against glibc
+# (from rust:bookworm-slim builder), it will NOT run on Alpine/musl.
 # ============================================================
-FROM docker.io/nginx:alpine
+FROM docker.io/nginx:bookworm-slim
 
-# Install runtime dependencies (libgcc/libstdc++ needed for RocksDB at runtime)
-RUN apk add --no-cache supervisor sed ca-certificates libgcc libstdc++
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    supervisor sed ca-certificates libgcc-s1 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy the compiled Conduit binary from builder
 COPY --from=builder /build/target/release/conduit /usr/local/bin/conduit
@@ -57,7 +61,7 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY element /var/www/element
 
 # Set proper permissions
-RUN chown -R nginx:nginx /var/www/element
+RUN chown -R www-data:www-data /var/www/element
 
 # Copy startup script
 COPY start.sh /start.sh
