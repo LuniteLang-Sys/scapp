@@ -21,39 +21,40 @@ cat > /etc/tor/torrc << EOF
 DataDirectory $TOR_DATA_DIR
 HiddenServiceDir $TOR_HS_DIR
 HiddenServicePort 80 127.0.0.1:$PORT
-Log notice stdout
 EOF
 
 # Ensure directories exist and have correct permissions
 mkdir -p "$TOR_HS_DIR"
-# On Debian, Tor runs as debian-tor. We must ensure it can write to the data dir.
 chown -R debian-tor:debian-tor "$TOR_DATA_DIR"
 chmod 700 "$TOR_HS_DIR"
 
 # Start Tor in background to generate hostname
 echo "Starting Tor to generate .onion address..."
-# We run it in background and redirect output to a temp file for debugging
-tor -f /etc/tor/torrc --RunAsDaemon 1 > /tmp/tor.log 2>&1
+# Start tor and wait for it to initialize
+tor -f /etc/tor/torrc --RunAsDaemon 1
 
 echo "Waiting for Tor to generate hidden service keys..."
-for i in {1..45}; do
-    if [ -f "$TOR_HS_DIR/hostname" ]; then
-        FINAL_DOMAIN=$(cat "$TOR_HS_DIR/hostname")
-        break
-    fi
-    # If Tor process died, show logs
-    if ! pgrep tor > /dev/null; then
-        echo "ERROR: Tor process died unexpectedly!"
-        cat /tmp/tor.log
+# We wait for the hostname file to appear
+MAX_RETRIES=60
+RETRY_COUNT=0
+while [ ! -f "$TOR_HS_DIR/hostname" ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    # Check if Tor is still running
+    if ! pgrep -x tor > /dev/null; then
+        echo "ERROR: Tor process died. Printing Tor system logs (if available):"
+        # On Debian, check tail of system log if possible, or just fail
         exit 1
     fi
     sleep 2
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    if [ $((RETRY_COUNT % 5)) -eq 0 ]; then
+        echo "Still waiting for Tor... ($((RETRY_COUNT * 2))s)"
+    fi
 done
 
-if [ -z "$FINAL_DOMAIN" ]; then
+if [ -f "$TOR_HS_DIR/hostname" ]; then
+    FINAL_DOMAIN=$(cat "$TOR_HS_DIR/hostname")
+else
     echo "ERROR: Tor failed to generate a hostname in time."
-    echo "Last Tor logs:"
-    cat /tmp/tor.log
     exit 1
 fi
 
