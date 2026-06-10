@@ -45,6 +45,7 @@ FROM docker.io/nginx:bookworm
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor sed ca-certificates libgcc-s1 libstdc++6 \
+    tor jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the compiled Conduit binary from builder
