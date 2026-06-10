@@ -5,7 +5,7 @@
 # musl libc does NOT support dynamic loading (dlopen), which causes
 # bindgen/libclang to fail with "Dynamic loading not supported".
 # ============================================================
-FROM docker.io/rust:bookworm-slim AS builder
+FROM docker.io/rust:slim-bookworm AS builder
 
 # Install build dependencies — Debian/glibc supports dynamic loading properly
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -40,7 +40,7 @@ RUN LIBCLANG_PATH=$(dirname $(find /usr/lib/llvm-* -name 'libclang.so*' -print -
 # NOTE: Must use Debian here too — binary is compiled against glibc
 # (from rust:bookworm-slim builder), it will NOT run on Alpine/musl.
 # ============================================================
-FROM docker.io/nginx:bookworm-slim
+FROM docker.io/nginx:bookworm
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
