@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     convert::TryFrom,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -354,6 +354,18 @@ enum AdminCommand {
     /// Enables incoming federation handling for a room again.
     EnableRoom { room_id: Box<RoomId> },
 
+    /// Join a room
+    Join { room_id: Box<RoomId> },
+
+    /// Invite a user to a room
+    Invite {
+        user_id: Box<UserId>,
+        room_id: Box<RoomId>,
+    },
+
+    /// List all known servers
+    ListServers,
+
     /// Sign a json object using Conduit's signing keys, putting the json in a codeblock
     SignJson,
 
@@ -414,7 +426,7 @@ pub struct ListMediaArgs {
 
 #[derive(Debug)]
 pub enum AdminRoomEvent {
-    ProcessMessage(String),
+    ProcessMessage(OwnedUserId, String),
     SendMessage(RoomMessageEventContent),
 }
 
@@ -452,7 +464,7 @@ impl Service {
                     Some(event) = receiver.recv() => {
                         let message_content = match event {
                             AdminRoomEvent::SendMessage(content) => content.into(),
-                            AdminRoomEvent::ProcessMessage(room_message) => self.process_admin_message(room_message).await,
+                            AdminRoomEvent::ProcessMessage(sender, room_message) => self.process_admin_message(sender, room_message).await,
                         };
 
                         let mutex_state = Arc::clone(
@@ -490,9 +502,9 @@ impl Service {
         }
     }
 
-    pub fn process_message(&self, room_message: String) {
+    pub fn process_message(&self, sender: OwnedUserId, room_message: String) {
         self.sender
-            .send(AdminRoomEvent::ProcessMessage(room_message))
+            .send(AdminRoomEvent::ProcessMessage(sender, room_message))
             .unwrap();
     }
 
@@ -503,7 +515,7 @@ impl Service {
     }
 
     // Parse and process a message from the admin room
-    async fn process_admin_message(&self, room_message: String) -> MessageType {
+    async fn process_admin_message(&self, sender: OwnedUserId, room_message: String) -> MessageType {
         let mut lines = room_message.lines().filter(|l| !l.trim().is_empty());
         let command_line = lines.next().expect("each string has at least one line");
         let body: Vec<_> = lines.collect();
@@ -519,7 +531,7 @@ impl Service {
             }
         };
 
-        match self.process_admin_command(admin_command, body).await {
+        match self.process_admin_command(sender, admin_command, body).await {
             Ok(reply_message) => reply_message,
             Err(error) => {
                 let markdown_message = format!(
@@ -563,6 +575,7 @@ impl Service {
 
     async fn process_admin_command(
         &self,
+        sender: OwnedUserId,
         command: AdminCommand,
         body: Vec<&str>,
     ) -> Result<MessageType> {
@@ -616,34 +629,141 @@ impl Service {
             }
             AdminCommand::ListRooms => {
                 let room_ids = services().rooms.metadata.iter_ids();
-                let output = format!(
-                    "Rooms:\n{}",
-                    room_ids
-                        .filter_map(|r| r.ok())
-                        .map(|id| id.to_string()
-                            + "\tMembers: "
-                            + &services()
-                                .rooms
-                                .state_cache
-                                .room_joined_count(&id)
-                                .ok()
-                                .flatten()
-                                .unwrap_or(0)
-                                .to_string())
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                );
-                RoomMessageEventContent::text_plain(output).into()
+                let mut markdown_message = String::from("| Room ID | Members | Link |\n| --- | --- | --- |");
+                let mut html_message = String::from("<table><thead><tr><th>Room ID</th><th>Members</th><th>Link</th></tr></thead><tbody>");
+                
+                let client_url = &services().globals.config.well_known.client;
+
+                for id in room_ids.filter_map(|r| r.ok()) {
+                    let count = services()
+                        .rooms
+                        .state_cache
+                        .room_joined_count(&id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or(0);
+                    
+                    let room_link = format!("{}/#/room/{}", client_url, id);
+                    markdown_message.push_str(&format!("\n| {} | {} | [Join]({}) |", id, count, room_link));
+                    html_message.push_str(&format!("<tr><td>{}</td><td>{}</td><td><a href=\"{}\">Join</a></td></tr>", id, count, room_link));
+                }
+                html_message.push_str("</tbody></table>");
+                RoomMessageEventContent::text_html(markdown_message, html_message).into()
             }
             AdminCommand::ListLocalUsers => match services().users.list_local_users() {
                 Ok(users) => {
-                    let mut msg: String = format!("Found {} local user account(s):\n", users.len());
-                    msg += &users.join("\n");
-                    RoomMessageEventContent::text_plain(&msg)
+                    let client_url = &services().globals.config.well_known.client;
+                    let mut markdown_message = format!("Found {} local user account(s):\n\n| User ID | Link |\n| --- | --- |", users.len());
+                    let mut html_message = format!("<p>Found {} local user account(s):</p><table><thead><tr><th>User ID</th><th>Link</th></tr></thead><tbody>", users.len());
+                    
+                    for user in users {
+                        let user_link = format!("{}/#/user/{}", client_url, user);
+                        markdown_message.push_str(&format!("\n| {} | [Profile]({}) |", user, user_link));
+                        html_message.push_str(&format!("<tr><td>{}</td><td><a href=\"{}\">Profile</a></td></tr>", user, user_link));
+                    }
+                    html_message.push_str("</tbody></table>");
+                    RoomMessageEventContent::text_html(markdown_message, html_message)
                 }
                 Err(e) => RoomMessageEventContent::text_plain(e.to_string()),
             }
             .into(),
+            AdminCommand::Join { room_id } => {
+                let mutex_state = Arc::clone(
+                    services().globals
+                        .roomid_mutex_state
+                        .write()
+                        .await
+                        .entry(room_id.to_owned())
+                        .or_default(),
+                );
+                let state_lock = mutex_state.lock().await;
+
+                services()
+                    .rooms
+                    .timeline
+                    .build_and_append_pdu(
+                        PduBuilder {
+                            event_type: TimelineEventType::RoomMember,
+                            content: to_raw_value(&RoomMemberEventContent {
+                                membership: MembershipState::Join,
+                                displayname: None,
+                                avatar_url: None,
+                                is_direct: None,
+                                third_party_invite: None,
+                                blurhash: None,
+                                reason: None,
+                                join_authorized_via_users_server: None,
+                            })
+                            .expect("event is valid"),
+                            unsigned: None,
+                            state_key: Some(sender.to_string()),
+                            redacts: None,
+                            timestamp: None,
+                        },
+                        &sender,
+                        &room_id,
+                        &state_lock,
+                    )
+                    .await?;
+                RoomMessageEventContent::text_plain("Joined room.").into()
+            }
+            AdminCommand::Invite { user_id, room_id } => {
+                let mutex_state = Arc::clone(
+                    services().globals
+                        .roomid_mutex_state
+                        .write()
+                        .await
+                        .entry(room_id.to_owned())
+                        .or_default(),
+                );
+                let state_lock = mutex_state.lock().await;
+
+                services()
+                    .rooms
+                    .timeline
+                    .build_and_append_pdu(
+                        PduBuilder {
+                            event_type: TimelineEventType::RoomMember,
+                            content: to_raw_value(&RoomMemberEventContent {
+                                membership: MembershipState::Invite,
+                                displayname: None,
+                                avatar_url: None,
+                                is_direct: None,
+                                third_party_invite: None,
+                                blurhash: None,
+                                reason: None,
+                                join_authorized_via_users_server: None,
+                            })
+                            .expect("event is valid"),
+                            unsigned: None,
+                            state_key: Some(user_id.to_string()),
+                            redacts: None,
+                            timestamp: None,
+                        },
+                        &sender,
+                        &room_id,
+                        &state_lock,
+                    )
+                    .await?;
+                RoomMessageEventContent::text_plain("Invited user.").into()
+            }
+            AdminCommand::ListServers => {
+                let mut servers = std::collections::HashSet::new();
+                for room_id in services().rooms.metadata.iter_ids() {
+                    if let Ok(room_id) = room_id {
+                        for server in services().rooms.state_cache.room_servers(&room_id) {
+                            if let Ok(server) = server {
+                                servers.insert(server);
+                            }
+                        }
+                    }
+                }
+                let mut msg = format!("Known federated servers ({}):\n", servers.len());
+                for server in servers {
+                    msg.push_str(&format!("- {}\n", server));
+                }
+                RoomMessageEventContent::text_plain(msg).into()
+            }
             AdminCommand::IncomingFederation => {
                 let map = services().globals.roomid_federationhandletime.read().await;
                 let mut msg: String = format!("Handling {} incoming pdus:\n", map.len());

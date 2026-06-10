@@ -514,7 +514,7 @@ impl Service {
                                 .state_cache
                                 .is_joined(server_user, &admin_room)?
                         {
-                            services().admin.process_message(body);
+                            services().admin.process_message(pdu.sender.clone(), body);
                         }
                     }
                 }
