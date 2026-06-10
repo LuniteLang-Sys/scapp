@@ -5,81 +5,74 @@ set -e
 PORT="${PORT:-10000}"
 CONDUIT_DATA_DIR="/var/lib/conduit"
 TOR_DATA_DIR="/var/lib/tor"
-mkdir -p "$CONDUIT_DATA_DIR" "$TOR_DATA_DIR"
+TOR_HS_DIR="$TOR_DATA_DIR/hidden_service"
+mkdir -p "$CONDUIT_DATA_DIR" "$TOR_HS_DIR"
 
 # ---------------------------------------------------------
-# TOR DISCOVERY (Use a temporary path to avoid lock issues)
+# TOR INITIALIZATION (Generate keys in the permanent location)
 # ---------------------------------------------------------
-echo "Configuring Tor Discovery..."
-TEMP_TOR_DIR="/tmp/tor_discovery"
-mkdir -p "$TEMP_TOR_DIR"
-chown -R debian-tor:debian-tor "$TEMP_TOR_DIR"
-chmod 700 "$TEMP_TOR_DIR"
+echo "Configuring Tor..."
+chown -R debian-tor:debian-tor "$TOR_DATA_DIR"
+chmod 700 "$TOR_HS_DIR"
 
-cat > /etc/tor/torrc.discovery << EOF
-DataDirectory $TEMP_TOR_DIR
-HiddenServiceDir $TEMP_TOR_DIR/hs
+cat > /etc/tor/torrc << EOF
+DataDirectory $TOR_DATA_DIR
+HiddenServiceDir $TOR_HS_DIR
 HiddenServicePort 80 127.0.0.1:$PORT
-SocksPort 0
+SocksPort 9050
+# Performance tweaks for Tor
+LongLivedPorts 80,443,6167
 EOF
 
-echo "Starting Tor Discovery to generate address..."
-su -s /bin/sh debian-tor -c "tor -f /etc/tor/torrc.discovery --RunAsDaemon 1 --PidFile /tmp/tor_discovery.pid"
+echo "Starting Tor to generate/verify .onion address..."
+# Start tor as debian-tor
+su -s /bin/sh debian-tor -c "tor -f /etc/tor/torrc --RunAsDaemon 1 --PidFile /tmp/tor.pid"
 
 echo "Waiting for .onion address..."
 for i in {1..60}; do
-    if [ -f "$TEMP_TOR_DIR/hs/hostname" ]; then
-        FINAL_DOMAIN=$(cat "$TEMP_TOR_DIR/hs/hostname")
+    if [ -f "$TOR_HS_DIR/hostname" ]; then
+        FINAL_DOMAIN=$(cat "$TOR_HS_DIR/hostname")
         break
     fi
     sleep 2
 done
 
 if [ -z "$FINAL_DOMAIN" ]; then
-    echo "ERROR: Tor discovery failed."
+    echo "ERROR: Tor failed to initialize."
     exit 1
 fi
 
 echo "========================================================="
-echo "Tor Hidden Service Address: $FINAL_DOMAIN"
+echo "FINAL Tor Hidden Service Address: $FINAL_DOMAIN"
 echo "========================================================="
 
-# Stop discovery Tor immediately and cleanup
-if [ -f /tmp/tor_discovery.pid ]; then
-    kill -9 $(cat /tmp/tor_discovery.pid) || true
-    rm -f /tmp/tor_discovery.pid
+# Stop Tor using the PID file to release the lock
+if [ -f /tmp/tor.pid ]; then
+    TOR_PID=$(cat /tmp/tor.pid)
+    echo "Stopping discovery Tor (PID: $TOR_PID)..."
+    kill -9 "$TOR_PID" || su -s /bin/sh debian-tor -c "kill -9 $TOR_PID" || true
+    rm -f /tmp/tor.pid
 fi
-rm -rf "$TEMP_TOR_DIR"
+# Clean up lock file just in case
+rm -f "$TOR_DATA_DIR/lock"
 
 # ---------------------------------------------------------
 # PERMANENT CONFIGURATION
 # ---------------------------------------------------------
-# 1. Tor (Main)
-echo "Configuring Permanent Tor..."
-mkdir -p "$TOR_DATA_DIR/hidden_service"
-chown -R debian-tor:debian-tor "$TOR_DATA_DIR"
-chmod 700 "$TOR_DATA_DIR/hidden_service"
-
-cat > /etc/tor/torrc << EOF
-DataDirectory $TOR_DATA_DIR
-HiddenServiceDir $TOR_DATA_DIR/hidden_service
-HiddenServicePort 80 127.0.0.1:$PORT
-SocksPort 9050
-# Performance tweaks for Tor
-FastFirstHopPK 1
-LongLivedPorts 80,443,6167
-EOF
-
-# 2. Nginx
+# 1. Nginx
 echo "Patching Nginx port..."
 sed -i "s/__PORT__/$PORT/g" /etc/nginx/nginx.conf
 
-# 3. Element
+# 2. Element
 CONFIG_JSON="/var/www/element/config.json"
 if [ -f "$CONFIG_JSON" ]; then
   echo "Patching Element..."
+  # Replace both the example and any previous onion address
   sed -i "s|matrix.example.com|$FINAL_DOMAIN|g" "$CONFIG_JSON"
-  sed -i "s|https://$FINAL_DOMAIN|http://$FINAL_DOMAIN|g" "$CONFIG_JSON"
+  # This regex is more broad to catch any existing .onion links
+  sed -i "s|https://[^ ]*\.onion|http://$FINAL_DOMAIN|g" "$CONFIG_JSON"
+  sed -i "s|http://[^ ]*\.onion|http://$FINAL_DOMAIN|g" "$CONFIG_JSON"
+  
   if grep -q "permalink_prefix" "$CONFIG_JSON"; then
     sed -i "s|\"permalink_prefix\": \".*\"|\"permalink_prefix\": \"http://$FINAL_DOMAIN\"|g" "$CONFIG_JSON"
   else
