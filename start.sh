@@ -65,9 +65,16 @@ DataDirectory $TOR_DATA_DIR
 HiddenServiceDir $TOR_DATA_DIR/hidden_service
 HiddenServicePort 80 127.0.0.1:$PORT
 SocksPort 9050
+# Performance tweaks for Tor
+FastFirstHopPK 1
+LongLivedPorts 80,443,6167
 EOF
 
-# 2. Element
+# 2. Nginx
+echo "Patching Nginx port..."
+sed -i "s/__PORT__/$PORT/g" /etc/nginx/nginx.conf
+
+# 3. Element
 CONFIG_JSON="/var/www/element/config.json"
 if [ -f "$CONFIG_JSON" ]; then
   echo "Patching Element..."
