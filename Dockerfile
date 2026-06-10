@@ -1,10 +1,11 @@
 # ============================================================
-# Stage 1: Build Conduit from source with default features
+# Stage 1: Build Conduit from source - SQLITE ONLY (no rocksdb)
+# sqlite uses bundled rusqlite (pure C, no libclang needed)
 # ============================================================
 FROM docker.io/rust:alpine AS builder
 
-# Build deps: musl, clang for rocksdb, git
-RUN apk add --no-cache musl-dev git clang llvm-dev pkgconfig openssl-dev openssl-libs-static cmake g++ lz4-dev zstd-dev
+# Only need basic C compiler (for sqlite bundled build), no libclang/llvm
+RUN apk add --no-cache musl-dev git pkgconfig openssl-dev openssl-libs-static
 
 # Clone specific stable release
 RUN git clone --depth 1 --branch v0.10.12 \
@@ -12,15 +13,15 @@ RUN git clone --depth 1 --branch v0.10.12 \
 
 WORKDIR /build
 
-# Cache bust to force recompile (change this value to rebuild)
-ARG CACHEBUST=3
+# Cache bust to force recompile
+ARG CACHEBUST=4
 
-# Build with DEFAULT features (includes backend_rocksdb + backend_sqlite + conduit_bin)
-# This ensures all backends are compiled in
+# Build with ONLY sqlite backend (no rocksdb = no libclang dependency)
+# backend_sqlite -> sqlite -> rusqlite (bundled, compiles from C source)
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-ENV LIBCLANG_PATH=/usr/lib/llvm19/lib
 RUN cargo build --release \
-    --features="conduit_bin,backend_rocksdb,backend_sqlite"
+    --no-default-features \
+    --features="conduit_bin,backend_sqlite"
 
 # ============================================================
 # Stage 2: Final Image — nginx:alpine + Conduit binary
@@ -28,7 +29,7 @@ RUN cargo build --release \
 FROM docker.io/nginx:alpine
 
 # Install runtime dependencies
-RUN apk add --no-cache supervisor sed ca-certificates lz4-libs zstd-libs
+RUN apk add --no-cache supervisor sed ca-certificates
 
 # Copy the compiled Conduit binary from builder
 COPY --from=builder /build/target/release/conduit /usr/local/bin/conduit

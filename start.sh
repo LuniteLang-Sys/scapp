@@ -45,7 +45,7 @@ cat > /etc/conduit/conduit.toml << EOF
 [global]
 server_name = "${CONDUIT_SERVER_NAME}"
 database_path = "/var/lib/matrix-conduit/"
-database_backend = "rocksdb"
+database_backend = "sqlite"
 port = 6167
 address = "127.0.0.1"
 allow_registration = true
