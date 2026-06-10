@@ -123,10 +123,27 @@ echo "================================================================="
 
 # Kill the background Tor process before starting supervisord
 if [ -f /tmp/tor.pid ]; then
-  kill $(cat /tmp/tor.pid) || true
+  TOR_PID=$(cat /tmp/tor.pid)
+  echo "Stopping discovery Tor (PID: $TOR_PID)..."
+  kill "$TOR_PID" || true
+  
+  # Wait for it to actually exit (up to 10 seconds)
+  for i in {1..10}; do
+    if ! kill -0 "$TOR_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  
+  # Force kill if still alive
+  kill -9 "$TOR_PID" 2>/dev/null || true
   rm -f /tmp/tor.pid
 fi
-sleep 2
+
+# IMPORTANT: Remove Tor's lock file if it exists to prevent "Another Tor process is running" error
+rm -f "$TOR_DATA_DIR/lock"
+
+sleep 1
 
 echo "Starting all services via supervisord..."
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
