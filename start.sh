@@ -25,13 +25,16 @@ EOF
 
 # Ensure directories exist and have correct permissions
 mkdir -p "$TOR_HS_DIR"
+# Ensure Conduit can write to data dir
+chown -R www-data:www-data "$DATA_DIR"
+# Ensure Tor can write to its data dir (overriding previous chown for this sub-path)
 chown -R debian-tor:debian-tor "$TOR_DATA_DIR"
 chmod 700 "$TOR_HS_DIR"
 
 # Start Tor in background to generate hostname
 echo "Starting Tor to generate .onion address..."
-# Start tor as debian-tor user to satisfy security checks
-su -s /bin/sh debian-tor -c "tor -f /etc/tor/torrc --PidFile /tmp/tor.pid --RunAsDaemon 1"
+# Start tor as debian-tor user with a PID file and NO SocksPort to avoid conflict with supervisord
+su -s /bin/sh debian-tor -c "tor -f /etc/tor/torrc --SocksPort 0 --PidFile /tmp/tor.pid --RunAsDaemon 1"
 
 echo "Waiting for Tor to generate hidden service keys..."
 # We wait for the hostname file to appear
