@@ -68,6 +68,9 @@ RUN chown -R www-data:www-data /var/www/element
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
+# Copy supervisord config
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
 # Expose the port Nginx is listening on
 EXPOSE 10000
 

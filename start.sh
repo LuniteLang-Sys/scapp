@@ -31,7 +31,7 @@ chmod 700 "$TOR_HS_DIR"
 # Start Tor in background to generate hostname
 echo "Starting Tor to generate .onion address..."
 # Start tor as debian-tor user to satisfy security checks
-su -s /bin/sh debian-tor -c "tor -f /etc/tor/torrc --RunAsDaemon 1"
+su -s /bin/sh debian-tor -c "tor -f /etc/tor/torrc --PidFile /tmp/tor.pid --RunAsDaemon 1"
 
 echo "Waiting for Tor to generate hidden service keys..."
 # We wait for the hostname file to appear
@@ -119,8 +119,11 @@ echo "ADMIN MASTER KEY: $MASTER_TOKEN"
 echo "================================================================="
 
 # Kill the background Tor process before starting supervisord
-pkill tor || true
-sleep 1
+if [ -f /tmp/tor.pid ]; then
+  kill $(cat /tmp/tor.pid) || true
+  rm -f /tmp/tor.pid
+fi
+sleep 2
 
 echo "Starting all services via supervisord..."
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
