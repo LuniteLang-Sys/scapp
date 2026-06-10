@@ -1,16 +1,20 @@
 # ============================================================
 # Stage 1: Build Conduit from source - RocksDB backend
 # RocksDB is the default & most stable backend for Conduit
+# NOTE: Using Debian (bookworm) instead of Alpine because Alpine's
+# musl libc does NOT support dynamic loading (dlopen), which causes
+# bindgen/libclang to fail with "Dynamic loading not supported".
 # ============================================================
-FROM docker.io/rust:alpine AS builder
+FROM docker.io/rust:bookworm-slim AS builder
 
-# Need clang/llvm for RocksDB bindgen, plus standard build tools
-RUN apk add --no-cache \
-    musl-dev git pkgconfig \
-    openssl-dev openssl-libs-static \
-    clang-dev llvm-dev \
-    zstd-dev zstd-static \
-    cmake g++ make
+# Install build dependencies — Debian/glibc supports dynamic loading properly
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git pkg-config \
+    clang libclang-dev llvm-dev \
+    libssl-dev \
+    libzstd-dev \
+    cmake g++ make ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Clone specific stable release
 RUN git clone --depth 1 --branch v0.10.12 \
@@ -21,10 +25,10 @@ WORKDIR /build
 # Cache bust to force recompile
 ARG CACHEBUST=6
 
-# Dynamically locate libclang.so — Alpine ships varying LLVM versions
-# so hardcoding llvm17 breaks on other Alpine releases.
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-RUN LIBCLANG_PATH=$(dirname $(find /usr -name 'libclang.so*' -print -quit 2>/dev/null)) \
+
+# Locate libclang — Debian ships it under /usr/lib/llvm-*/lib/
+RUN LIBCLANG_PATH=$(dirname $(find /usr/lib/llvm-* -name 'libclang.so*' -print -quit 2>/dev/null)) \
     && echo "Found libclang at: $LIBCLANG_PATH" \
     && export LIBCLANG_PATH \
     && cargo build --release \
