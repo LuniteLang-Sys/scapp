@@ -22,8 +22,16 @@ CONFIG_JSON="/var/www/element/config.json"
 if [ -f "$CONFIG_JSON" ]; then
   echo "Patching Element config.json..."
   # Replace all occurrences of matrix.example.com with the actual domain
-  # This handles https://matrix.example.com and the raw domain
   sed -i "s|matrix.example.com|$FINAL_DOMAIN|g" "$CONFIG_JSON"
+  
+  # Configure permalink_prefix to use our own domain instead of matrix.to
+  # We check if permalink_prefix already exists, if not we add it
+  if grep -q "permalink_prefix" "$CONFIG_JSON"; then
+    sed -i "s|\"permalink_prefix\": \".*\"|\"permalink_prefix\": \"https://$FINAL_DOMAIN\"|g" "$CONFIG_JSON"
+  else
+    # Insert before the last closing brace
+    sed -i "s|}$|, \"permalink_prefix\": \"https://$FINAL_DOMAIN\"}|" "$CONFIG_JSON"
+  fi
 fi
 
 # ---------------------------------------------------------
