@@ -9,6 +9,7 @@ RUN apk add --no-cache \
     musl-dev git pkgconfig \
     openssl-dev openssl-libs-static \
     clang-dev llvm-dev \
+    zstd-dev zstd-static \
     cmake g++ make
 
 # Clone specific stable release
@@ -18,14 +19,17 @@ RUN git clone --depth 1 --branch v0.10.12 \
 WORKDIR /build
 
 # Cache bust to force recompile
-ARG CACHEBUST=5
+ARG CACHEBUST=6
 
-# Build with RocksDB backend (default, stable, no runtime config issues)
+# Dynamically locate libclang.so — Alpine ships varying LLVM versions
+# so hardcoding llvm17 breaks on other Alpine releases.
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-ENV LIBCLANG_PATH=/usr/lib/llvm17/lib
-RUN cargo build --release \
-    --no-default-features \
-    --features="conduit_bin,backend_rocksdb"
+RUN LIBCLANG_PATH=$(dirname $(find /usr -name 'libclang.so*' -print -quit 2>/dev/null)) \
+    && echo "Found libclang at: $LIBCLANG_PATH" \
+    && export LIBCLANG_PATH \
+    && cargo build --release \
+        --no-default-features \
+        --features="conduit_bin,backend_rocksdb"
 
 # ============================================================
 # Stage 2: Final Image — nginx:alpine + Conduit binary
