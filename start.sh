@@ -3,61 +3,40 @@ set -e
 
 # Configuration
 PORT="${PORT:-10000}"
-DATA_DIR="/var/lib/matrix-conduit"
-mkdir -p "$DATA_DIR"
+CONDUIT_DATA_DIR="/var/lib/conduit"
+TOR_DATA_DIR="/var/lib/tor"
+mkdir -p "$CONDUIT_DATA_DIR" "$TOR_DATA_DIR"
 
 # ---------------------------------------------------------
-# TOR CONFIGURATION
+# TOR DISCOVERY (Use a temporary path to avoid lock issues)
 # ---------------------------------------------------------
-echo "Configuring Tor..."
-TOR_DATA_DIR="$DATA_DIR/tor"
-TOR_HS_DIR="$TOR_DATA_DIR/hidden_service"
+echo "Configuring Tor Discovery..."
+TEMP_TOR_DIR="/tmp/tor_discovery"
+mkdir -p "$TEMP_TOR_DIR"
+chown -R debian-tor:debian-tor "$TEMP_TOR_DIR"
+chmod 700 "$TEMP_TOR_DIR"
 
-# Clear old config to avoid conflicts
-rm -f /etc/tor/torrc
-
-# Create fresh torrc
-cat > /etc/tor/torrc << EOF
-DataDirectory $TOR_DATA_DIR
-HiddenServiceDir $TOR_HS_DIR
+cat > /etc/tor/torrc.discovery << EOF
+DataDirectory $TEMP_TOR_DIR
+HiddenServiceDir $TEMP_TOR_DIR/hs
 HiddenServicePort 80 127.0.0.1:$PORT
+SocksPort 0
 EOF
 
-# Ensure directories exist and have correct permissions
-mkdir -p "$TOR_HS_DIR"
-# Ensure Conduit can write to data dir
-chown -R www-data:www-data "$DATA_DIR"
-# Ensure Tor can write to its data dir (overriding previous chown for this sub-path)
-chown -R debian-tor:debian-tor "$TOR_DATA_DIR"
-chmod 700 "$TOR_HS_DIR"
+echo "Starting Tor Discovery to generate address..."
+su -s /bin/sh debian-tor -c "tor -f /etc/tor/torrc.discovery --RunAsDaemon 1 --PidFile /tmp/tor_discovery.pid"
 
-# Start Tor in background to generate hostname
-echo "Starting Tor to generate .onion address..."
-# Start tor as debian-tor user with a PID file and NO SocksPort to avoid conflict with supervisord
-su -s /bin/sh debian-tor -c "tor -f /etc/tor/torrc --SocksPort 0 --PidFile /tmp/tor.pid --RunAsDaemon 1"
-
-echo "Waiting for Tor to generate hidden service keys..."
-# We wait for the hostname file to appear
-MAX_RETRIES=60
-RETRY_COUNT=0
-while [ ! -f "$TOR_HS_DIR/hostname" ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    # Check if Tor is still running
-    if ! pgrep -x tor > /dev/null; then
-        echo "ERROR: Tor process died. Printing Tor system logs (if available):"
-        # On Debian, check tail of system log if possible, or just fail
-        exit 1
+echo "Waiting for .onion address..."
+for i in {1..60}; do
+    if [ -f "$TEMP_TOR_DIR/hs/hostname" ]; then
+        FINAL_DOMAIN=$(cat "$TEMP_TOR_DIR/hs/hostname")
+        break
     fi
     sleep 2
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    if [ $((RETRY_COUNT % 5)) -eq 0 ]; then
-        echo "Still waiting for Tor... ($((RETRY_COUNT * 2))s)"
-    fi
 done
 
-if [ -f "$TOR_HS_DIR/hostname" ]; then
-    FINAL_DOMAIN=$(cat "$TOR_HS_DIR/hostname")
-else
-    echo "ERROR: Tor failed to generate a hostname in time."
+if [ -z "$FINAL_DOMAIN" ]; then
+    echo "ERROR: Tor discovery failed."
     exit 1
 fi
 
@@ -65,16 +44,35 @@ echo "========================================================="
 echo "Tor Hidden Service Address: $FINAL_DOMAIN"
 echo "========================================================="
 
+# Stop discovery Tor immediately and cleanup
+if [ -f /tmp/tor_discovery.pid ]; then
+    kill -9 $(cat /tmp/tor_discovery.pid) || true
+    rm -f /tmp/tor_discovery.pid
+fi
+rm -rf "$TEMP_TOR_DIR"
+
 # ---------------------------------------------------------
-# CONFIGURE ELEMENT WEB
+# PERMANENT CONFIGURATION
 # ---------------------------------------------------------
+# 1. Tor (Main)
+echo "Configuring Permanent Tor..."
+mkdir -p "$TOR_DATA_DIR/hidden_service"
+chown -R debian-tor:debian-tor "$TOR_DATA_DIR"
+chmod 700 "$TOR_DATA_DIR/hidden_service"
+
+cat > /etc/tor/torrc << EOF
+DataDirectory $TOR_DATA_DIR
+HiddenServiceDir $TOR_DATA_DIR/hidden_service
+HiddenServicePort 80 127.0.0.1:$PORT
+SocksPort 9050
+EOF
+
+# 2. Element
 CONFIG_JSON="/var/www/element/config.json"
 if [ -f "$CONFIG_JSON" ]; then
-  echo "Patching Element config.json..."
-  # Use http for .onion addresses
+  echo "Patching Element..."
   sed -i "s|matrix.example.com|$FINAL_DOMAIN|g" "$CONFIG_JSON"
   sed -i "s|https://$FINAL_DOMAIN|http://$FINAL_DOMAIN|g" "$CONFIG_JSON"
-  
   if grep -q "permalink_prefix" "$CONFIG_JSON"; then
     sed -i "s|\"permalink_prefix\": \".*\"|\"permalink_prefix\": \"http://$FINAL_DOMAIN\"|g" "$CONFIG_JSON"
   else
@@ -82,31 +80,25 @@ if [ -f "$CONFIG_JSON" ]; then
   fi
 fi
 
-# ---------------------------------------------------------
-# CONFIGURE WELL-KNOWN DISCOVERY
-# ---------------------------------------------------------
-echo "Generating .well-known files..."
+# 3. Discovery Files
 mkdir -p /var/www/element/.well-known/matrix
 echo "{\"m.homeserver\": {\"base_url\": \"http://$FINAL_DOMAIN\"}}" > /var/www/element/.well-known/matrix/client
 echo "{\"m.server\": \"$FINAL_DOMAIN:80\"}" > /var/www/element/.well-known/matrix/server
 
-# ---------------------------------------------------------
-# ADMIN MASTER KEY
-# ---------------------------------------------------------
-if [ ! -f "$DATA_DIR/master_token.txt" ]; then
-  tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32 > "$DATA_DIR/master_token.txt"
-fi
-MASTER_TOKEN=$(cat "$DATA_DIR/master_token.txt")
-
-# ---------------------------------------------------------
-# CONDUIT CONFIGURATION
-# ---------------------------------------------------------
+# 4. Conduit
 echo "Configuring Conduit..."
+chown -R www-data:www-data "$CONDUIT_DATA_DIR"
+if [ ! -f "$CONDUIT_DATA_DIR/master_token.txt" ]; then
+  tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32 > "$CONDUIT_DATA_DIR/master_token.txt"
+fi
+MASTER_TOKEN=$(cat "$CONDUIT_DATA_DIR/master_token.txt")
+chown www-data:www-data "$CONDUIT_DATA_DIR/master_token.txt"
+
 mkdir -p /etc/conduit
 cat > /etc/conduit/conduit.toml << EOF
 [global]
 server_name = "${FINAL_DOMAIN}"
-database_path = "$DATA_DIR"
+database_path = "$CONDUIT_DATA_DIR"
 database_backend = "${CONDUIT_DATABASE_BACKEND:-rocksdb}"
 port = 6167
 address = "127.0.0.1"
@@ -121,29 +113,6 @@ echo "================================================================="
 echo "ADMIN MASTER KEY: $MASTER_TOKEN"
 echo "================================================================="
 
-# Kill the background Tor process before starting supervisord
-if [ -f /tmp/tor.pid ]; then
-  TOR_PID=$(cat /tmp/tor.pid)
-  echo "Stopping discovery Tor (PID: $TOR_PID)..."
-  kill "$TOR_PID" || true
-  
-  # Wait for it to actually exit (up to 10 seconds)
-  for i in {1..10}; do
-    if ! kill -0 "$TOR_PID" 2>/dev/null; then
-      break
-    fi
-    sleep 1
-  done
-  
-  # Force kill if still alive
-  kill -9 "$TOR_PID" 2>/dev/null || true
-  rm -f /tmp/tor.pid
-fi
-
-# IMPORTANT: Remove Tor's lock file if it exists to prevent "Another Tor process is running" error
-rm -f "$TOR_DATA_DIR/lock"
-
 sleep 1
-
 echo "Starting all services via supervisord..."
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
