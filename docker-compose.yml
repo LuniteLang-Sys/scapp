@@ -21,19 +21,33 @@ services:
       dockerfile: Dockerfile.nginx
     container_name: scapp_nginx
     ports:
-      - "8080:80"
+      - "80:80"
+      - "443:443"
     volumes:
       - ./element:/var/www/element
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
     restart: unless-stopped
     networks:
       - scapp_net
     depends_on:
       - conduit
 
+  # Certbot
+  certbot:
+    image: certbot/certbot
+    container_name: scapp_certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    restart: unless-stopped
+    networks:
+      - scapp_net
+
   # Tor Onion Service
   tor:
-    image: alpine:latest # Or a specialized tor image
+    image: alpine:latest
     container_name: scapp_tor
     command: ["apk add tor && tor -f /etc/tor/torrc"]
     volumes:

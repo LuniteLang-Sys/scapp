@@ -40,6 +40,11 @@ Ensure these directories exist and are writable by the container user.
 - The server automatically generates a `.onion` address upon first startup if configured in `torrc`.
 - Logs can be viewed via `docker-compose logs -f`.
 - To update, pull the latest image and restart: `docker-compose pull && docker-compose up -d --build`.
+- **SSL Certificates:** To initialize Let's Encrypt SSL certificates (once you have a domain), run:
+  ```bash
+  docker-compose run --rm certbot certonly --webroot --webroot-path=/var/www/certbot -d yourdomain.com
+  ```
+  Then, add the corresponding SSL configuration to your `nginx.conf` and restart Nginx.
 
 ---
 *For manual development or specific configurations, refer to the individual service directories.*
