@@ -1,0 +1,19 @@
+# Stage 1: Build Conduit
+FROM docker.io/rust:slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git pkg-config clang libclang-dev llvm-dev libssl-dev libzstd-dev cmake g++ make ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch v0.10.12 https://gitlab.com/famedly/conduit.git /build
+WORKDIR /build
+
+RUN LIBCLANG_PATH=$(dirname $(find /usr/lib/llvm-* -name 'libclang.so*' -print -quit 2>/dev/null)) \
+    && export LIBCLANG_PATH \
+    && cargo build --release --no-default-features --features="conduit_bin,backend_rocksdb"
+
+# Stage 2: Final Image
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libgcc-s1 libstdc++6 && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /build/target/release/conduit /usr/local/bin/conduit
+CMD ["/usr/local/bin/conduit"]
