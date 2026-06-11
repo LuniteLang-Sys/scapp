@@ -45,6 +45,11 @@ Ensure these directories exist and are writable by the container user.
   docker-compose run --rm certbot certonly --webroot --webroot-path=/var/www/certbot -d yourdomain.com
   ```
   Then, add the corresponding SSL configuration to your `nginx.conf` and restart Nginx.
+- **Supabase Media Storage:** To enable media (images/avatars) storage via Supabase, set the following Environment Variables on Render:
+  - `S3_BUCKET`: Your Supabase bucket name.
+  - `S3_ENDPOINT`: Your Supabase S3 endpoint URL.
+  - `S3_ACCESS_KEY`: Your Supabase access key.
+  - `S3_SECRET_KEY`: Your Supabase secret key.
 
 ---
 *For manual development or specific configurations, refer to the individual service directories.*

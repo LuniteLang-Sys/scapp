@@ -107,6 +107,14 @@ registration_token = "${MASTER_TOKEN}"
 allow_federation = false
 max_request_size = 20000000
 trusted_servers = []
+
+[media]
+backend = "s3"
+s3_bucket = "${S3_BUCKET}"
+s3_endpoint = "${S3_ENDPOINT}"
+s3_region = "${S3_REGION:-us-east-1}"
+s3_access_key = "${S3_ACCESS_KEY}"
+s3_secret_key = "${S3_SECRET_KEY}"
 EOF
 
 echo "================================================================="
