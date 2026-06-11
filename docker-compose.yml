@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  scapp:
+    build: .
+    container_name: scapp
+    ports:
+      - "8080:10000" # Map host 8080 to container 10000 (nginx port)
+    volumes:
+      # Persistent storage for database and configuration
+      - ./conduit_db:/var/lib/conduit
+      - ./config:/etc/conduit
+    restart: unless-stopped
+    environment:
+      - PORT=10000
